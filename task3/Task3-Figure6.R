@@ -28,7 +28,7 @@ radius <- rowSums(frechet)
 angs <- frechet[,1:3]/radius
 
 
-pdf("../figures/Figure6a.pdf", width = 5, height = 5)
+pdf("../figures/Figure6a.pdf", width = 4, height = 4)
 par(mar = rep(0.2, 4))
 TernaryPlot(
    atip = expression(W[1]), 
@@ -49,7 +49,10 @@ matplot(x = d12$u,
         yaxs = "i",
         type = "l",
         ylab = expression(eta),
-        xlab = "quantile level")
+        xlab = "Quantile level",
+        lwd = 1.25,
+        cex.axis = 1.25,
+        cex.lab = 1.25)
 matplot(x = d13$u,
         y = d13$eta,
         lty = c(1,2,2),
@@ -65,12 +68,15 @@ matplot(x = d23$u,
 matplot(x = d12$u,
         y = d12$chi,
         lty = c(1,2,2),
+        lwd = 1.25,
         col = 1,
         ylim = c(0,0.5),
         yaxs = "i",
         type = "l",
         ylab = expression(chi),
-        xlab = "quantile level")
+        xlab = "Quantile level",
+        cex.lab = 1.25,
+        cex.axis = 1.25)
 matplot(x = d13$u,
         y = d13$chi,
         lty = c(1,2,2),

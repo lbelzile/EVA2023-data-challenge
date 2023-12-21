@@ -17,7 +17,7 @@ profile <- mev::gpd.pll(
    psi = seq(170, 240, length.out = 101),
    param = "quant",
    dat = Y,
-   thresh = u,
+   threshold = u,
    p = 1/(0.1*60000))
 # Obtain return levels
 retlev <- function(threshold, scale, shape,
@@ -93,18 +93,19 @@ qu[which.min(loss)]
 kdens <- density(retlev_gp, adjust = 2, bw = "SJ")
 
 
-pdf("../figures/C2_unconditional.pdf", width = 8, height = 4)
+pdf("../figures/Figure5.pdf", width = 7.5, height = 3.5)
 par(bty = "n", mar = c(4,4,1,1), mfrow = c(1,2))
 # Profile log-likelihood with confints
 plot(profile,
      xlim = c(170, 220),
      ylim = c(-5,0),
-     xlab = "return level")
+     ylab = "Profile log-likelihood",
+     xlab = "Return level")
 # Plot loss as function of qhat
 plot(qu, loss-min(loss),
      type = 'l',
-     xlab = "return level",
-     ylab = "loss",
+     xlab = "Return level",
+     ylab = "Loss",
      xlim = c(160,240),
      lwd = 2)
 lines(x = kdens$x[kdens$x < 220],
@@ -112,5 +113,3 @@ lines(x = kdens$x[kdens$x < 220],
       xlim = c(160, 220), lty = 2)
 abline(v = qu[which.min(loss)], lwd = 0.5, col = "grey", lty = 2)
 dev.off()
-   
-   
