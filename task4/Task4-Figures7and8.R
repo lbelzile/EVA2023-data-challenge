@@ -42,10 +42,9 @@ hclust_od <- dplyr::case_match(.x = hclust_od1,
                                5 ~ 3,
                                2 ~ 4,
                                1 ~ 5)
+table(hclust_od)
 clust_order <-
-  order(as.integer(paste0(hclust_od, c(
-    paste0(0, 1:9), 11:50
-  ))))
+  order(as.integer(paste0(hclust_od, c(paste0(0, 1:9), 10:50))))
 # Transform to uniform scale
 unif <- exp(-exp(-Utopula)) # Gumbel to uniform
 
@@ -76,48 +75,40 @@ if (generateFigures) {
   diag(tailcormat) <- 1
   # Keep same ordering/names as previous plot
   colnames(tailcormat) <- rownames(tailcormat) <- rownames(cormat)
-
+  grayp <- grey(c(rep(1, 50), 
+                  1-c(seq(0,0.1, length.out = 15), 
+                 seq(0.1,1, length.out = 36))))
   # Correlation plots
   pdf("../figures/Figure7.pdf",
-      width = 12,
+      width = 11,
       height = 5)
   par(mfrow = c(1, 2), mar = c(0, 7, 1, 5))
-  corrplot::corrplot(
-    apply(cormat, 1:2, function(x) {
-      pmax(0, x)
-    })[clust_order, clust_order],
+  corr <- apply(cormat, 1:2, function(x) {
+    pmax(0, x)
+  })[clust_order, clust_order]
+  corrplot::corrplot(corr,
     order = 'original',
     tl.col = "black",
-    tl.cex = 0.5,
-    cl.cex = 1.5,
-    col = grey.colors(
-      n = 101,
-      start = 1,
-      end = 0,
-      gamma = 3.5
-    ),
+    tl.cex = 0.7,
+    cl.cex = 1.3,
+    col = grayp,
     col.lim = c(0, 1),
     addgrid.col = "white",
-    tl.pos = "l",
-    method = 'square'
+    tl.pos = "d",
+    method = 'shade'
   )
 
   corrplot::corrplot(
     tailcormat[clust_order, clust_order],
     tl.col = "black",
     order = "original",
-    tl.cex = 0.5,
-    cl.cex = 1.5,
-    col = grey.colors(
-      n = 101,
-      start = 1,
-      end = 0,
-      gamma = 3.5
-    ),
+    tl.cex = 0.7,
+    cl.cex = 1.3,
+    col = grayp,
     col.lim = c(0, 1),
     addgrid.col = "white",
-    tl.pos = "l",
-    method = 'square'
+    tl.pos = "d",
+    method = 'shade'
   )
   dev.off()
 }

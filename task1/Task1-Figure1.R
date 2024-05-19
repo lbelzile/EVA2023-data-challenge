@@ -123,7 +123,8 @@ g1 <- ggplot(
    geom_hex(bins = 40) +
    geom_vline(xintercept = cpos / 300) +
    labs(x = "Year", y = "", subtitle = "Wind direction (radians) ") +
-   viridis::scale_fill_viridis() +
+  colorspace::scale_fill_continuous_sequential(
+    palette = "Purple-Yellow") +
    scale_x_continuous(limits = c(0, 70), expand = c(0, 0)) +
    scale_y_continuous(
       limits = c(0, 2 * pi),

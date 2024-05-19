@@ -1,6 +1,6 @@
 setwd(this.path::here())
-library(chandwich)
 library(mev)
+library(mvPot)
 source("Task4-functions.R")
 
 
@@ -37,80 +37,107 @@ hclust_od <- dplyr::case_match(.x = hclust_od1,
                                5 ~ 3,
                                2 ~ 4,
                                1 ~ 5)
-clust_order <- order(as.integer(paste0(hclust_od, c(paste0(0, 1:9), 11:50))))
+clust_order <- order(as.integer(paste0(hclust_od, c(paste0(0, 1:9), 10:50))))
 # Transform to uniform scale
 unif <- exp(-exp(-Utopula)) # Gumbel to uniform
 
 
 #####################################################
-####     APPROACH 2 - CONDITIONAL EXTREMES     ######
-####     EXCHANGEABLE HEFFERNAN-TAWN MODEL     ######
+####     CROSS-VALIDATION FOR AD CLUSTERS      ######
 #####################################################
-# Quantile levels for threshold stability plots
-qlevs <- seq(0.005, 0.05, by = 0.005)
-data <- apply(unif, 2, qlaplace)
-v1 <- qlaplace(1 - 1 / 300)
-v2 <- qlaplace(1 - 12 / 300)
-# Check transformation is correct
-#stopifnot(isTRUE(all(rank(data[1,])== rank(Utopula[1,]))))
-
-# Repeat the following steps for each cluster
-for (k in 1:5) {
-  cl <- k  #pick cluster
+for (k in 1:2){
+  cl <- c(1, 4)[k]
+  mthresh <- 0.5 # marginal threshold for left-censoring
+  # risk threshold for max
   clsize <- sum(hclust_od == cl)
   u1size <- sum((1:50)[hclust_od == cl] <= 25)
-  # Create container for parameter estimates (alpha, beta)
-  # and confidence intervals at each threshold
-  param_mat <- param_mat_u <- array(data = NA,
-                     dim = c(2, 3, length(qlevs)))
-  for (qlev_ind in seq_along(qlevs)) {
-    # For each quantile level
-    qlev <- qlevs[qlev_ind]
-    #####################################################
-    ####  Heffernan-Tawn model estimation          ######
-    #####################################################
-    # Obtain point estimates by maximizing pseudo-likelihood
+  Cl <- unif[, hclust_od == cl]
+  pairs <- combn(clsize, 2)
+  th <- 0.97 # threshold level
+  vlev <- 0.99 # validation level
+  vlev2 <- 0.96
+  # Containers for l2 distance
+  dchi_log_p <- rep(0, ncol(pairs))
+  dchi_br_p <- rep(0, ncol(pairs))
+  dchi_ht_p <- rep(0, ncol(pairs))
+  # Containers for w2 distance
+  dw2_log_p <- rep(0, ncol(pairs))
+  dw2_br_p <- rep(0, ncol(pairs))
+  dw2_ht_p <- rep(0, ncol(pairs))
+  for (i in seq_len(ncol(pairs))) {
+    set.seed(i)
+    # extract data from the cluster, ignoring validation data
+    sdat <- Cl[, -pairs[, i]]
+    # subsample to retrieve exceedances
+    sdat <- sdat[apply(sdat, 1, max) > th, ]
+    # compute empirical measure (eq. 7)
+    emp_chi <- mean(rowSums(Cl[, pairs[, i]] > vlev) == 2) / (1 - vlev)
+    # Consider different probabilities for w2 (eq. 8)
+    emp_w2 <- mean((Cl[, pairs[1, i]] > vlev &
+                       Cl[, pairs[2, i]] > vlev2) |
+                   (Cl[, pairs[1, i]] > vlev2 &
+                         Cl[, pairs[2, i]] > vlev)) /
+      (2 * (1 - th))
+    # Fit the multivariate generalized Pareto models
+    opt_par_log_cv <- fit_mgp(
+      data = sdat,
+      model = "log",
+      mthresh = mthresh,
+      thresh = th
+    )
+    opt_par_br_cv <- fit_mgp(
+      data = sdat,
+      model = "br",
+      mthresh = mthresh,
+      thresh = th
+    )
+    # Compute l2 distance (pointwise)
+    dchi_log_p[i] <-
+      expme_log_min(u = rep(1, 2),
+                    par = opt_par_log_cv$mle) - emp_chi
+    dchi_br_p[i] <-
+      expme_BR_min(z = rep(1, 2),
+                   Lambda = Lmat_exch(opt_par_br_cv$mle, D = 2)) -
+      emp_chi
+    # Compute w2 distance (pointwise)
+    dw2_log_p[i] <- expme_log_min(
+      u = c(vlev, vlev2),
+      par = opt_par_log_cv$mle) /
+      expme(z = rep(th, 2), par = opt_par_log_cv$mle, model = "log") - emp_w2
+    dw2_log_p[i] <-
+      expme_log_min(u = rep(1, 2),
+                    par = opt_par_log_cv$mle) - emp_chi
+    dw2_br_p[i] <- expme_BR_min(
+      z = c(vlev, vlev2),
+      Lmat_exch(opt_par_br_cv$mle, D = 2)) /
+      expme(z = rep(th, 2),
+            par = list(Lambda = Lmat_exch(opt_par_br_cv$mle, D = 2)),
+            model = "br") - emp_w2
+   # fit the exchangeable conditional extremes model
     opt <- Rsolnp::solnp(
       pars = c(0.2, 0.1, rep(0, 3)),
       fun = function(x) {
         -sum(eht_pll(
           par = x,
-          thresh = 1 - qlev,
-          data = data[, hclust_od == cl],
+          thresh = th,
+          data = apply(Cl, 2, qlaplace)[, -pairs[, i]],
           type = "skewnorm",
           constrain = TRUE
         ))
       },
       LB = c(-1, rep(-1e3, 3), -1e3),
-      UB = c(rep(1, 2)+1e-10, rep(1e3, 2), 1e3),
+      UB = c(rep(1, 2), rep(1e3, 2), 1e3),
       control = list(trace = FALSE)
     )
-    opt_unconst <- Rsolnp::solnp(
-      pars = c(0.2, 0.1, rep(0, 3)),
-      fun = function(x) {
-        -sum(eht_pll(
-          par = x,
-          thresh = 1 - qlev,
-          data = data[, hclust_od == cl],
-          type = "skewnorm",
-          constrain = FALSE
-        ))
-      },
-      LB = c(-1, rep(-1e3, 3), -1e3),
-      UB = c(rep(1, 2)+1e-10, rep(1e3, 2), 1e3),
-      control = list(trace = FALSE)
-    )
-    # Fit the model with asymptotic dependence, because
-    # the ridge region won't be visited by the optimization algorithm
     opt2 <- Rsolnp::solnp(
       pars = c(rep(0, 3)),
       fun = function(x) {
         -sum(eht_pll(
           par = c(0.9999,0, x),
-          thresh = 1 - qlev,
-          data = data[, hclust_od == cl],
+          thresh = th,
+          data = apply(Cl, 2, qlaplace)[, -pairs[, i]],
           type = "skewnorm",
-          constrain = TRUE
+          constrain = FALSE
         ))
       },
       LB = rep(-1e3, 3),
@@ -118,305 +145,184 @@ for (k in 1:5) {
       control = list(trace = FALSE)
     )
     if(tail(opt$values,1) < tail(opt2$values,1)){
-      alphabeta <- opt$pars[1:2]
+      alpha <- opt$pars[1]
+      beta <- opt$pars[2]
     } else{
-      alphabeta <- c(1,0)
+      alpha <- 1
+      beta <- 0
     }
-    # Store point estimates
-    param_mat[, 1, qlev_ind] <- alphabeta
-    param_mat_u[,1,qlev_ind] <- opt_unconst$pars[1:2]
-    if (alphabeta[1] < 0.98) {
-      which.pars <- c("alpha", "beta")
-      # Adjust the likelihood for repeated data
-      adjprof <- adjust_loglik(
-        loglik = eht_pll,
-        p = 5,
-        # number of parameters
-        thresh = 1 - qlev,
-        # marginal threshold
-        data = data[, hclust_od == cl],
-        mle = opt$pars,
-        type = "skewnorm",
-        par_names = c("alpha", "beta", "mu", "sigma", "kappa")
-      )
-      # Compute adjusted confidence intervals
-      confints <- chandwich:::conf_intervals(adjprof,
-                                             which_pars = which.pars)
-      param_mat[(1:2)[c("alpha", "beta") %in% which.pars], -1, qlev_ind] <-
-        confints$prof_CI
-    }
+
+
+    residuals <- # use function to get residuals
+      c(residuals_eht(
+        alpha = alpha,
+        beta = beta,
+        data = apply(Cl, 2, qlaplace)[, -pairs[, i]],
+        thresh = th
+      )$res)
+    y0 <- rexp(n = length(residuals)) + qlaplace(vlev)
+    dchi_ht_p[i] <-
+      mean(alpha * y0 + y0 ^ beta * residuals > qlaplace(vlev)) -
+      emp_chi
+   y0 <- rexp(n = length(residuals)) + qlaplace(vlev2)
+   dw2_ht_p[i] <-
+    mean(alpha * y0 + y0 ^ beta * residuals > qlaplace(vlev))/
+    mean(y0 > qlaplace(th) & (alpha * y0 + y0 ^ beta * residuals > qlaplace(th))) -
+    emp_w2
   }
-  # Parameter stability plots
-  pdf(
-    paste0("../figures/Task4-threshold_stability", cl, ".pdf"),
-    width = 10,
-    height = 4.5
-  )
-  par(mfrow = c(1, 2),
-      mar = c(4, 4.5, 1, 1),
-      bty = "l")
-  matplot(
-    x = 1 - qlevs,
-    y = t(param_mat[1, , ]),
-    type = "l",
-    lty = c(1, 2, 2),
-    col = 1,
-    ylim = c(-0.2, 1),
-    ylab = expression(alpha),
-    xlab = "quantile level"
-  )
-  matplot(
-    x = 1 - qlevs,
-    y = t(param_mat[2, , ]),
-    type = "l",
-    lty = c(1, 2, 2),
-    ylim = c(0, 1),
-    col = 1,
-    ylab = expression(beta),
-    xlab = "quantile level"
-  )
-  dev.off()
 
+  dchi_l2_log_p <- sqrt(sum(dchi_log_p^2)) / ncol(pairs)
+  dchi_l2_br_p <- sqrt(sum(dchi_br_p^2)) / ncol(pairs)
+  dchi_l2_ht_p <- sqrt(sum(dchi_ht_p^2)) / ncol(pairs)
+  dw2_log_p <- sqrt(sum(dw2_log_p^2)) / ncol(pairs)
+  dw2_br_p <- sqrt(sum(dw2_br_p^2)) / ncol(pairs)
+  dw2_ht_p <- sqrt(sum(dw2_ht_p^2)) / ncol(pairs)
+  # Ratio of l2 measures (smaller is better)
+  dchi_l2_log_p / dchi_l2_br_p
+  dchi_l2_log_p / dchi_l2_ht_p
+  # Ratio of w2 measures (smaller is better)
+  dw2_log_p / dw2_br_p
+  dw2_log_p / dw2_ht_p
+  # Test for equality using paired samples
+  t.test(x = dchi_log_p^2,
+         y = dchi_br_p^2,
+         paired = TRUE)
+  t.test(x = dchi_log_p^2,
+         y = dchi_ht_p^2,
+         paired = TRUE)
 
+  triples <- combn(clsize, 3)
+  th <- 0.97
+  vlev <- 0.99
+  dchi_log_t <- rep(0, ncol(triples))
+  dchi_br_t <- rep(0, ncol(triples))
+  dchi_ht_t <- rep(0, ncol(triples))
+  for (i in seq_along(dchi_log_t)) {
+    set.seed(i)
+    sdat <- Cl[, -triples[, i]]
+    sdat <- sdat[apply(sdat, 1, max) > th, ]
+    emp_chi <- mean(rowSums(Cl[, triples[, i]] > vlev) == 3) / (1 - vlev)
+    opt_par_log_cv <- fit_mgp(
+      data = sdat,
+      model = "log",
+      mthresh = mthresh,
+      thresh = th
+    )
+    dchi_log_t[i] <-
+      expme_log_min(u = rep(1, 3),
+                    par = opt_par_log_cv$mle) -
+      emp_chi
+    opt_par_br_cv <- fit_mgp(
+      data = sdat,
+      model = "br",
+      mthresh = mthresh,
+      thresh = th
+    )
+    dchi_br_t[i] <-
+      expme_BR_min(z = rep(1, 3),
+                   Lambda = Lmat_exch(opt_par_br_cv$mle, D = 3)) -
+      emp_chi
 
-  #####################################################
-  ####  Extract residuals and estimate prob.     ######
-  #####################################################
-  # Extract parameters for the selected threshold
-
-  probs <- matrix(NA, nrow = length(qlevs), ncol = 3)
-  for (ql in seq_along(qlevs)) {
-    alpha <- param_mat[1, 1, ql]
-    beta <- param_mat[2, 1, ql]
-    th <- 1 - qlevs[ql]
+    opt <- Rsolnp::solnp(
+      pars = c(0.2, 0.1, rep(0, 3)),
+      fun = function(x) {
+        -sum(eht_pll(
+          par = x,
+          thresh = th,
+          data = apply(Cl, 2, qlaplace)[, -triples[, i]],
+          type = "skewnorm"
+        ))
+      },
+      LB = c(-1, rep(-1e3, 3), -1e3),
+      UB = c(rep(1, 2), rep(1e3, 2), 1e3),
+      control = list(trace = FALSE)
+    )
+    alpha <- opt$pars[1]
+    beta <- opt$pars[2]
     residuals <- # use function to get residuals
       residuals_eht(
         alpha = alpha,
         beta = beta,
-        data = data[, hclust_od == cl],
+        data = apply(Cl, 2, qlaplace)[, -triples[, i]],
         thresh = th
-      )
+      )$res
 
-    # Test equality of distribution for residuals
-    # print(energy::eqdist.etest(
-    #   residuals$res,
-    #   sizes = residuals$nexc,
-    #   distance = FALSE,
-    #   method = "original",
-    #   R = 999))
+    dchi_ht_t[i] <- mean(replicate(expr = {
+      y0 <- rexp(n = length(residuals)) + qlaplace(vlev)
 
-    Zmin <- apply(residuals$res, 1, min)
-    y0s <- qexp_level(Zmin, v1)
-    # Compute Monte Carlo estimator
-    log(mean(exp(-y0s)))
-    # A more numerically stable version is here
-    p2 <- logp(y0s)
-    probs[ql, 3] <- p2
-    # Using a permutation approach
-    ngclust <- table(ifelse(which(hclust_od == cl) <= 25, 1, 2))
-    #U2 has lower defense
-    combos <- combn(m = ngclust[1], sum(ngclust))
-    p1p_s <- vector("numeric", length = ncol(combos))
-    for (i in seq_len(ncol(combos))) {
-      clustid <- rep(2, sum(ngclust))
-      clustid[combos[, i]] <- 1
-      residuals2 <- # use function to get residuals
-        residuals_eht(
-          alpha = alpha,
-          beta = beta,
-          data = data[, hclust_od == cl],
-          thresh = th,
-          testIndep = FALSE,
-          group = clustid
-        )
-      Zmin1 <- with(residuals2,
-                    apply(res[, seq_len(ng - 1)], 1, min))
-      Zmin2 <- with(residuals2,
-                    apply(res[, -seq_len(ng - 1)], 1, min))
-      # Plot residuals
-      # plot(Zmin1, Zmin2)
-      y0s1 <- qexp_level(Zmin1, v1)
-      y0s2 <- qexp_level(Zmin2, v2)
-      p1p_s[i] <- logp(pmax(y0s1, y0s2))
-      # print(i)
-    }
-    p1p <- mean(p1p_s)
-    probs[ql, 2] <- p1p
-    # Using the identity of the columns
-    residuals2 <- # use function to get residuals
-      residuals_eht(
-        alpha = alpha,
-        beta = beta,
-        data = data[, hclust_od == cl],
-        thresh = th,
-        testIndep = FALSE,
-        group = ifelse(which(hclust_od == cl) <= 25, 1, 2)
-      )
-    Zmin1 <- with(residuals2,
-                  apply(res[, seq_len(ng - 1)], 1, min))
-    Zmin2 <- with(residuals2,
-                  apply(res[, -seq_len(ng - 1)], 1, min))
-    # Plot residuals
-    # plot(Zmin1, Zmin2)
-    v2 <- qlaplace(1 - 12 / 300)
-    y0s1 <- qexp_level(Zmin1, v1)
-    y0s2 <- qexp_level(Zmin2, v2)
-    p1 <- logp(pmax(y0s1, y0s2))
-    probs[ql, 1] <- p1
+      mean(sapply(1:nrow(residuals),
+                  function(j) {
+                    sum(alpha * y0[j] + y0[j] ^ beta *
+                          residuals[j, sample(ncol(residuals), 2)] >
+                          qlaplace(vlev)) == 2L
+                  }))
+    }, n = 100))  -  emp_chi
   }
-  # Inconsistent estimates: the estimated
-  #  probability is smaller than before...
-  # but we know p1 < p2!
-  # Culprit is difference in residuals
-  # logp(qexp_level(with(residuals2,
-  #                      apply(res, 1, min)), v1))
-  # Probability of exceedance under independence
-  p2_indep <- -clsize * log(300)
-  p1_indep <- -u1size * log(300) - (clsize - u1size) * log(12 / 300)
 
-  # Assign names for ease
-  dimnames(param_mat) <- list(
-    param = c("alpha", "beta"),
-    est = c("estimate", "lower", "upper"),
-    qlev = paste0(qlevs)
+  dchi_l2_log_t <- sqrt(sum(dchi_log_t^2)) / ncol(triples)
+  dchi_l2_br_t <- sqrt(sum(dchi_br_t^2)) / ncol(triples)
+  dchi_l2_ht_t <- sqrt(sum(dchi_ht_t^2)) / ncol(triples)
+  # Ratio of l2-distance
+  dchi_l2_log_t / dchi_l2_br_t
+  dchi_l2_log_t / dchi_l2_ht_t
+  # Test for equality using paired samples
+  t.test(x = dchi_log_t^2,
+         y = dchi_br_t^2,
+         paired = TRUE)
+  t.test(x = dchi_log_t^2,
+         y = dchi_ht_t^2,
+         paired = TRUE)
+
+results_gof <- rbind(
+    c(dchi_l2_log_p, dchi_l2_br_p, dchi_l2_ht_p),
+    c(dw2_log_p, dw2_br_p, dw2_ht_p),
+    c(dchi_l2_log_t, dchi_l2_br_t, dchi_l2_ht_t)
   )
-  colnames(probs) <- c("p1", "p1p", "p2")
-  rownames(probs) <- 1 - qlevs
-  results <- list(
-    prob = probs,
-    indep = c(p1 = p1_indep, p2 = p2_indep),
-    parameters = param_mat,
-    uparameters = param_mat_u
-  )
-  save(results,
-       file = paste0("../outputs/C4_results_cl", cl, ".RData"),
-       version = 2)
-}
-
-
-# Load all results
-interm_res <- list.files(path = "../outputs/",
-                         full.names = TRUE,
-                         pattern = "C4_results_cl")
-C4 <- matrix(nrow = 5, ncol = 2)
-params <- matrix(nrow = 5, ncol = 2)
-for (i in seq_along(interm_res)) {
-  load(file = interm_res[i])
-  C4[i, ] <- results$prob[4, 2:3]
-  params[i, ] <- results$parameters[, 1, 4]
-}
-
-tab <- apply(rbind(
-  table(hclust_od),
-  sprintf("%.3f", t(C4[, 1])),
-  sprintf("%.3f", t(C4[, 2])),
-  paste0("(", apply(params, 1, function(x) {
-    paste(sprintf("%.2g", x),  collapse = ", ")
-  }), ")")
-),
-1:2, function(x) {
-  paste0("$", x, "$")
-})
-rownames(tab) <- c(
-  "cluster size",
-  "$\\log(\\widehat{p}_1)$",
-  "$\\log(\\widehat{p}_2)$",
-  "$(\\widehat{\\alpha}, \\widehat{\\beta})$"
-)
-cat(
-  knitr::kable(
-    tab,
-    format = "latex",
-    col.names = paste0("$C_", 1:5, "$"),
-    booktabs = TRUE,
-    escape = FALSE,
-    align = c("rrrrr")
-  ),
-  file = "../tables/Table8.tex"
-)
 
 
 
-# Return results for qlev = 0.02 (98%)
-C4 <- exp(colSums(C4))
-# save(C4, file = "../submission/AnswerC4.Rdata", version = 2)
-
-# Plot profile likelihood (adjusted)
-# for the Heffernan-Tawn model for AI clusters
-for (cl in c(2, 3, 5)) {
-  opt <- Rsolnp::solnp(
-    pars = c(0.2, 0.1, rep(0, 3)),
-    fun = function(x) {
-      -sum(eht_pll(
-        par = x,
-        thresh = .98,
-        data = data[, hclust_od == cl],
-        type = "skewnorm"
-      ))
-    },
-    LB = c(-1, rep(-1e3, 3), -1e3),
-    UB = c(rep(1, 2), rep(1e3, 2), 1e3),
-    control = list(trace = FALSE)
-  )
-  adjprof <- adjust_loglik(
-    loglik = eht_pll,
-    p = 5,
-    # number of parameters
-    thresh = 0.98,
-    # marginal threshold
-    data = data[, hclust_od == cl],
-    mle = opt$pars,
-    type = "skewnorm",
-    par_names = c("alpha", "beta", "mu", "sigma", "kappa")
-  )
-  assign(
-    x = paste0("prof_cl", cl),
-    chandwich::conf_region(
-      adjprof,
-      which_pars = c("alpha", "beta"),
-      type = "vertical",
-      conf = 99
-    )
+ save(
+    results_gof,
+    file = paste0("../outputs/Task4-results_AD_gof_cl", cl, ".RData"),
+    version = 2
   )
 }
 
-pdf("../figures/Task4-profile_cl.pdf",
-    width = 12,
-    height = 5)
-par(mfrow = c(1, 3),
-    mar = c(4, 4, 1, 1),
-    bty = "l")
-plot(
-  prof_cl2,
-  conf = c(50, 75, 90, 95, 99),
-  xlab = expression(alpha),
-  ylab = expression(beta),
-  xlim = c(0, 0.2),
-  ylim = c(0.2, 0.45),
-  xaxs = "i",
-  yaxs = "i"
-)
-points(params[2, 1], params[2, 2], pch = 4)
-plot(
-  prof_cl3,
-  conf = c(50, 75, 90, 95, 99),
-  xlab = expression(alpha),
-  ylab = expression(beta),
-  xlim = c(0.15, 0.45),
-  ylim = c(0.35, 0.5),
-  xaxs = "i",
-  yaxs = "i"
-)
-points(params[3, 1], params[3, 2], pch = 4)
-plot(
-  prof_cl5,
-  conf = c(50, 75, 90, 95, 99),
-  xlab = expression(alpha),
-  ylab = expression(beta),
-  xlim = c(0.04, 0.15),
-  ylim = c(0.1, 0.35),
-  xaxs = "i",
-  yaxs = "i"
-)
-points(params[5, 1], params[5, 2], pch = 4)
-dev.off()
+load("../outputs/Task4-results_AD_gof_cl1.RData")
+gof1 <- apply(results_gof, 1:2, function(x){sprintf(1000*x, fmt = "%.1f")})
+
+load("../outputs/Task4-results_AD_gof_cl4.RData")
+gof2 <- apply(results_gof, 1:2, function(x){sprintf(1000*x, fmt = "%.1f")})
+  # Print table with distances
+rownames(gof1) <- rownames(gof2) <- c(
+  "pairs",
+  "triples",
+  "unequal")
+colnames(gof1) <- colnames(gof2) <- c("logistic","Hüsler--Rei{\\ss}","Heffernan--Tawn")
+
+# Create table
+tab <- xtable::xtable(x = cbind(t(gof1[c(1,3,2),]),
+                               t(gof2[c(1,3,2),])),
+                   align = c("lrrrrrr"))
+
+
+addtorow <- list()
+addtorow$pos <- list(0)
+addtorow$command <- paste0(
+  paste0('& \\multicolumn{3}{c}{cluster ', c(1,4), '}',
+         collapse=''),
+  '\\\\',
+  "\\cmidrule(l){2-4} \\cmidrule(l){5-7}",
+  "Model &",
+  paste0(rep(c("pairs",
+               "triples",
+               "unequal"), length.out = 6L),
+         collapse = " & ",
+         sep = " "),"\\\\")
+print(tab,
+      booktabs = TRUE,
+      floating = FALSE,
+      include.colnames = FALSE,
+      file = "../tables/Table8.tex",
+      add.to.row = addtorow,
+      sanitize.rownames.function = identity)

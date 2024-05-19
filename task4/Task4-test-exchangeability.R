@@ -24,7 +24,7 @@ hclust_od1 <- cutree(tree = hclust(as.dist(1 - cormat),
                                    method = "ward.D2"),
                      k = 5)
 
-clust_order <- order(as.integer(paste0(hclust_od1, c(paste0(0, 1:9), 11:50))))
+clust_order <- order(as.integer(paste0(hclust_od1, c(paste0(0, 1:9), 10:50))))
 # Use block structured data
 X <- as.matrix(Utopula[,clust_order])
 n <- nrow(X)

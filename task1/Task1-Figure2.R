@@ -15,44 +15,43 @@ data <- Amaurot |>
 
 model_thr_ald <- list(Y ~ Season + s(V1, bs = "cs") + s(V2, bs = "cs") +
                          s(V3, bs = "cs") + s(V4, bs = "cs") +
-                         s(WindDirection , bs = "cs") + s(WindSpeed , bs = "cs") +
+                         s(WindDirection , bs = "cc") + s(WindSpeed , bs = "cs") +
                          s(Atmosphere, bs = "cs"),
                       ~ Season + s(V1, bs = "cs") + s(V2, bs = "cs") +
                          s(V3, bs = "cs") + s(V4, bs = "cs") +
-                         s(WindDirection , bs = "cs") + s(WindSpeed , bs = "cs") +
+                         s(WindDirection , bs = "cc") + s(WindSpeed , bs = "cs") +
                          s(Atmosphere, bs = "cs"))
 
 ## fitting asymmetric Laplace for the threshold
 
-fit_thr_ald_0.95 <- evgam(model_thr_ald,
+# fit_thr_ald_0.95 <- evgam(model_thr_ald,
+#                           data = data,
+#                           family = "ald",
+#                           ald.args = list(tau = 0.95))
+fit_thr_ald_0.98 <- evgam(model_thr_ald,
                           data = data,
                           family = "ald",
-                          ald.args = list(tau = 0.95))
-fit_thr_ald_0.99 <- evgam(model_thr_ald,
-                          data = data,
-                          family = "ald",
-                          ald.args = list(tau = 0.99))
+                          ald.args = list(tau = 0.98))
 
-threshold_0.95 <- predict(fit_thr_ald_0.95)$location
-threshold_0.99 <- predict(fit_thr_ald_0.99)$location
+# threshold_0.95 <- predict(fit_thr_ald_0.95)$location
+threshold_0.98 <- predict(fit_thr_ald_0.98)$location
 
 scatter.plotter <- function(X, Y, varname1, varname2, minv = NA){
    
-   exceed_0.95 <- which(Y > threshold_0.95)
-   exceed_0.99 <- which(Y > threshold_0.99)
+   # exceed_0.95 <- which(Y > threshold_0.95)
+   exceed_0.98 <- which(Y > threshold_0.98)
    
-   X_0.95 <- X[setdiff(exceed_0.95, exceed_0.99)]
-   Y_0.95 <- Y[setdiff(exceed_0.95, exceed_0.99)]
-   X_0.99 <- X[exceed_0.99]
-   Y_0.99 <- Y[exceed_0.99]
-   # cols <- MetBrewer::met.brewer("Hiroshige", n = 2)
+   # X_0.95 <- X[setdiff(exceed_0.95, exceed_0.98)]
+   # Y_0.95 <- Y[setdiff(exceed_0.95, exceed_0.98)]
+   X_0.98 <- X[exceed_0.98]
+   Y_0.98 <- Y[exceed_0.98]
    p <- ggplot() +
       geom_hex(aes(x = X, y = Y), bins = 50, alpha = 0.5) +
-      geom_point(aes(x = X_0.95, y = Y_0.95), shape = "cross") +
-      geom_point(aes(x = X_0.99, y = Y_0.99),
+      # geom_point(aes(x = X_0.95, y = Y_0.95), shape = "cross") +
+      geom_point(aes(x = X_0.98, y = Y_0.98),
                  colour = "black", fill = "white", shape = 23) +
-      viridis::scale_color_viridis() +
-     viridis::scale_fill_viridis() +
+     colorspace::scale_fill_continuous_sequential(
+       palette = "Purple-Yellow") + 
       labs(x = varname1,
            y = "") +
       scale_y_continuous(expand = expansion(mult = c(0, 0.1))) +

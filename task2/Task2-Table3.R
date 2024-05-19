@@ -75,7 +75,7 @@ cat(
                 row.names = TRUE,
                 escape = FALSE,
                 align = c('rrrr')),
-   file = "../tables/Table5.tex")
+   file = "../tables/Table3.tex")
 
 # In the final submission, we picked a single model
 # We fixed zeta_u to the MLE

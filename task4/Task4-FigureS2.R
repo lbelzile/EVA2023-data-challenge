@@ -38,7 +38,7 @@ hclust_od <- dplyr::case_match(.x = hclust_od1,
                                5 ~ 3,
                                2 ~ 4,
                                1 ~ 5)
-clust_order <- order(as.integer(paste0(hclust_od, c(paste0(0, 1:9), 11:50))))
+clust_order <- order(as.integer(paste0(hclust_od, c(paste0(0, 1:9), 10:50))))
 # Transform to uniform scale
 unif <- exp(-exp(-Utopula)) # Gumbel to uniform
 
@@ -106,14 +106,15 @@ g1 <- ggplot() +
     cluster = factor(unlist(sapply(1:5, function(i){
       rep(i, length.out = nres[i])})))),
     mapping = aes(x = z, color = cluster, fill = cluster),
-    bw = "SJ", alpha = 0.1) +
+    bw = "sj", alpha = 0.1) +
   scale_x_continuous(limits = c(-5, 8)) +
   scale_y_continuous(expand = expansion(mult = c(0, 0.1))) +
   scale_color_viridis_d() +
   scale_fill_viridis_d() +
   labs(y = "", subtitle = "density", x = "scaled residuals") +
   theme_classic() +
-  theme(legend.position = c(0.8, 0.5))
+  theme(legend.position = "inside",
+        legend.position.inside = c(0.8, 0.5))
 
 g2 <- ggplot() +
   stat_function(fun = funy0, xlim = c(3, 150)) +
@@ -123,6 +124,6 @@ g2 <- ggplot() +
        subtitle = expression(z[min] - (v[1]-alpha*y[0])/y[0]^beta)) +
   theme_classic()
 g1 + g2
-ggsave("../figures/FigureS1.pdf",
+ggsave("../figures/FigureS2.pdf",
        width = 8,
        height = 4)

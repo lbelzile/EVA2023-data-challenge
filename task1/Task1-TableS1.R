@@ -84,4 +84,4 @@ cat(knitr::kable(rmse_tab,
                  format = "latex", 
                  escape = FALSE, 
                  booktabs = TRUE),
-     file = "../tables/Table1.tex")
+     file = "../tables/TableS1.tex")
