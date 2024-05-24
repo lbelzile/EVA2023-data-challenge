@@ -41,7 +41,7 @@ for (mod_id in 1:4) {
       1 - mean(quants[, 1] > mod$tau | quants[, 5] < mod$tau)  # coverage 80%
     )
 }
-
+cat(
 knitr::kable(
   summary_th*100,
   col.names = c("level", "bias", "std. error", "coverage (50\\%)", "coverage (80\\%)"),
@@ -49,4 +49,4 @@ knitr::kable(
   format = "latex",
   digits = c(0,2,3,1,1),
   escape = FALSE)
-
+    file = "../tables/TableS3.tex")

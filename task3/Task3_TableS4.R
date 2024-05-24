@@ -149,7 +149,7 @@ cat(
     booktabs = TRUE,
     format = "latex"
   ),
-  file = "../tables/TableS3.tex"
+  file = "../tables/TableS4.tex"
 )
 
 

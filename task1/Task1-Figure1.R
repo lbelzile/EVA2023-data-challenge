@@ -1,172 +1,89 @@
-## Load libraries
 setwd(this.path::here())
-library(mev)
-library(circular)
-library(changepoint)
-library(energy)
+library(mgcv)
+library(ismev)
+library(evgam)
 library(ggplot2)
+library(dplyr)
+library(tidyr)
 library(patchwork)
-## Load data
-data <- read.csv(file = "../data/Amaurot.csv")
-data <- data |>
-   dplyr::mutate(Season = as.integer(as.factor(Season)))
-Y <- data$Y
+library(ggpointdensity)
 
-# Testing for independence between groups
-set.seed(2023)
-groups <- list(
-   c("V1", "V2"),
-   c("V3", "Season"),
-   "V4",
-   c("WindSpeed", "xWindDirection", "yWindDirection"),
-   "Atmosphere"
-)
-dataTests <- data
-dataTests$Season <- ifelse(data$Season == "S1", 0, 1)
-dataTests$xWindDirection <- cos(dataTests$WindDirection)
-dataTests$yWindDirection <- sin(dataTests$WindDirection)
-indep_tests <- replicate(
-   n = 10,
-   expr = {
-       apply(combn(length(groups), m = 2), 2, function(inds) {
-          data_mat <-
-             as.matrix(na.omit(dataTests[, unlist(c(groups[inds[1]], groups[inds[2]]))]))
-          # Subsample because otherwise there is a memory allocation error
-          obsnum <-
-             sample.int(n = nrow(data_mat), size = 2500)
-          # Extract the length of the first block
-          l <- length(unlist(groups[inds[1]]))
-          # Energy test of independence with distance covariance
-          test <-
-             energy::indep.test(x = data_mat[obsnum, 1:l],
-                                y = data_mat[obsnum, -(1:l)],
-                                R = 399) # number of bootstrap replications
-          test$p.value
-       })
-    })
-# reject independence test between Wind and Atmosphere
+Amaurot <- read.csv("../data/Amaurot.csv")
+data <- Amaurot |>
+   dplyr::mutate(Season = as.factor(Season)) |>
+   tidyr::drop_na()
 
+model_thr_ald <- list(Y ~ Season + s(V1, bs = "cs") + s(V2, bs = "cs") +
+                         s(V3, bs = "cs") + s(V4, bs = "cs") +
+                         s(WindDirection , bs = "cc") + s(WindSpeed , bs = "cs") +
+                         s(Atmosphere, bs = "cs"),
+                      ~ Season + s(V1, bs = "cs") + s(V2, bs = "cs") +
+                         s(V3, bs = "cs") + s(V4, bs = "cs") +
+                         s(WindDirection , bs = "cc") + s(WindSpeed , bs = "cs") +
+                         s(Atmosphere, bs = "cs"))
 
-## Fit changepoint model
-changepoint <-
-   changepoint::cpt.meanvar(data = na.omit(data$WindDirection),
-                            method = "AMOC")
-# Manually identify threshold
-changepoint@cpts[1] <- 8200
-cpos <-
-   changepoint@cpts[1] + sum(which(is.na(data$WindDirection)) < changepoint@cpts[1])
+## fitting asymmetric Laplace for the threshold
 
-deg(circular::mean.circular(data$WindDirection[1:cpos], na.rm = TRUE))
+# fit_thr_ald_0.95 <- evgam(model_thr_ald,
+#                           data = data,
+#                           family = "ald",
+#                           ald.args = list(tau = 0.95))
+fit_thr_ald_0.98 <- evgam(model_thr_ald,
+                          data = data,
+                          family = "ald",
+                          ald.args = list(tau = 0.98))
 
-deg(circular::mean.circular(data$WindDirection[-(1:cpos)], na.rm = TRUE))
+# threshold_0.95 <- predict(fit_thr_ald_0.95)$location
+threshold_0.98 <- predict(fit_thr_ald_0.98)$location
 
-# Proportion of 1 vs 2
-prop_wind <- cpos / length(na.omit(data$WindDirection))
-rwinddummy <- function(n) {
-   2 - rbinom(n = n, size = 1, prob = prop_wind)
+scatter.plotter <- function(X, Y, varname1, varname2, minv = NA){
+   
+   # exceed_0.95 <- which(Y > threshold_0.95)
+   exceed_0.98 <- which(Y > threshold_0.98)
+   
+   # X_0.95 <- X[setdiff(exceed_0.95, exceed_0.98)]
+   # Y_0.95 <- Y[setdiff(exceed_0.95, exceed_0.98)]
+   X_0.98 <- X[exceed_0.98]
+   Y_0.98 <- Y[exceed_0.98]
+   p <- ggplot() +
+      geom_hex(aes(x = X, y = Y), bins = 50, alpha = 0.5) +
+      # geom_point(aes(x = X_0.95, y = Y_0.95), shape = "cross") +
+      geom_point(aes(x = X_0.98, y = Y_0.98),
+                 colour = "black", fill = "white", shape = 23) +
+     colorspace::scale_fill_continuous_sequential(
+       palette = "Purple-Yellow") + 
+      labs(x = varname1,
+           y = "") +
+      scale_y_continuous(expand = expansion(mult = c(0, 0.1))) +
+      scale_x_continuous(limits = c(minv, NA),
+                         expand = expansion(mult = c(0, 0.1))) +
+      theme_classic() +
+      theme(legend.position = "none")
+   p
 }
 
-
-# Fit circular density estimator
-k1 <- circular::density.circular(
-   x =
-      circular::as.circular(
-         na.omit(data$WindDirection[1:cpos]),
-         modulo = "2pi",
-         units = "radian"
-      ),
-   from = -pi,
-   to = pi,
-   bw = 75
-)
-k2 <- circular::density.circular(
-   x =
-      circular::as.circular(
-         na.omit(data$WindDirection[-(1:cpos)]),
-         modulo = "2pi",
-         units = "radian"
-      ),
-   from = -pi,
-   to = pi,
-   bw = 75
-)
-dens <- cbind(k1$x, k1$y, k2$y)
-
-predict_ang <- function(angle, k1, k2) {
-   k1dens <- sapply(angle, function(ang) {
-      k1$y[which.min((k1$x - ang) %% (2 * pi))]
-   })
-   k2dens <- sapply(angle, function(ang) {
-      k2$y[which.min((k2$x - ang) %% (2 * pi))]
-   })
-   apply(cbind(k1dens, k2dens), 1, which.min)
-}
-# Example of prediction
-angle <- seq(0, 2 * pi, length.out = 101)
-predict_ang(angle, k1, k2)
-pi_scales <-
-   scales::math_format(
-      .x * pi,
-      format = function(x)
-         x / pi
-   )
-g1 <- ggplot(
-   data = data.frame(
-      x = 1:21000 / 300,
-      y = data$WindDirection %% (2 * pi),
-      cluster = factor(c(rep(1, cpos), rep(0, 21000 - cpos)))
-   ),
-   mapping = aes(x = x, y = y,
-                 group = cluster)
-) +
-   # ggpointdensity::geom_pointdensity() +
-   geom_hex(bins = 40) +
-   geom_vline(xintercept = cpos / 300) +
-   labs(x = "Year", y = "", subtitle = "Wind direction (radians) ") +
-  colorspace::scale_fill_continuous_sequential(
-    palette = "Purple-Yellow") +
-   scale_x_continuous(limits = c(0, 70), expand = c(0, 0)) +
-   scale_y_continuous(
-      limits = c(0, 2 * pi),
-      expand = c(0, 0),
-      breaks = c(0, pi / 2, pi, 3 * pi / 2, 2 * pi),
-      labels = pi_scales
-   ) +
-   theme_classic() +
-   theme(legend.position = "none")
-
-g2 <- ggplot(
-   data = data.frame(
-      x = as.numeric(c(k1$x, k2$x)),
-      y = as.numeric(c(k1$y, k2$y)),
-      group = factor(c(rep(1, length(
-         k1$x
-      )),
-      rep(2, length(
-         k2$x
-      ))))
-   ),
-   mapping = aes(
-      x = x,
-      y = y,
-      group = group,
-      col = group
-   )
-) +
-   geom_line() +
-   scale_color_grey() +
-   scale_x_continuous(
-      limits = c(0, 2 * pi),
-      expand = c(0, 0),
-      breaks = c(0, pi / 2, pi, 3 * pi / 2, 2 * pi),
-      labels = pi_scales
-   )  +
-   scale_y_continuous(limits = c(0, NA), expand = expansion(mult = c(0, 0.1))) +
-   labs(x = "Angles (in radians)", y = "") +
-   theme_classic() +
-   theme(legend.position = "none")
-pdf("../figures/Figure1.pdf",
-    width = 7,
-    height = 3.5)
-g1 + g2
-dev.off()
+g1 <- with(data, scatter.plotter(X = V1, Y = Y, varname1 = expression(V[1])))
+g2 <- with(data, scatter.plotter(X = V2, Y = Y, varname1 = expression(V[2])))
+g3 <- with(data, scatter.plotter(X = V3, Y = Y, varname1 = expression(V[3])), minv = 0)
+g4 <- with(data, scatter.plotter(X = V4, Y = Y, varname1 = expression(V[4])), minv = 0)
+g5 <- with(data, scatter.plotter(X = WindSpeed,
+                                 Y = Y, varname1 = "Wind speed"))
+g6 <- with(data, scatter.plotter(X = Atmosphere,
+                                 Y = Y, varname1 = "Atmosphere"))
+g7 <-  with(data, scatter.plotter(X = WindDirection,
+                                  Y = Y, varname1 = "Wind direction")) +
+   scale_x_continuous(limits = c(-pi, pi),
+                      breaks = seq(-pi, pi/2, by = pi/2),
+                      labels =  c(expression(pi),
+                                  expression(3*pi/2),
+                                  expression(0),
+                                  expression(pi/2)
+                      )) +
+   scale_y_continuous(breaks = NULL) +
+   coord_polar(start = +pi/2, direction = -1) + 
+  theme(legend.text = element_text(size = 15))
+ggsave("../figures/Figure1.pdf",
+       width = 10,
+       height = 6,
+       plot = (g1 | g2 | g3 | g4) / (g6 | g5 | g7),
+       dpi = 300)
